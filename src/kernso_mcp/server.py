@@ -597,8 +597,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.stdio:
-        import asyncio
-        asyncio.run(mcp.run_stdio())
+        mcp.run(transport="stdio")
     else:
         import uvicorn
         logger.info(
