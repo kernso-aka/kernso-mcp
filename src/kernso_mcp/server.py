@@ -50,6 +50,8 @@ from kernso_mcp_common import (
     scrub_pii,
     format_error,
     TelemetryEmitter,
+    APIKeyAuth,
+    TokenBucketRateLimiter,
 )
 
 # ─── Configuration (all from env vars, never hardcoded) ───
@@ -62,6 +64,7 @@ KERNSO_API_KEY = os.environ.get("KERNSO_API_KEY", "")
 MCP_PORT = int(os.environ.get("MCP_PORT", "8080"))
 GCP_PROJECT = os.environ.get("GCP_PROJECT")
 TELEMETRY_ENABLED = os.environ.get("TELEMETRY_ENABLED", "true").lower() == "true"
+MCP_API_KEYS_JSON = os.environ.get("MCP_API_KEYS", "{}")  # JSON: {tenant: sha256_hash}
 
 # ─── Logging (stderr only — stdout reserved for stdio MCP protocol) ───
 
@@ -73,6 +76,32 @@ telemetry = TelemetryEmitter(
     project_id=GCP_PROJECT,
     enabled=TELEMETRY_ENABLED,
 )
+
+# ─── Auth + Rate Limiting (HTTP only, stdio skips) ───
+
+import hashlib
+import json as _json
+
+_api_key_hashes: dict[str, str] = {}  # sha256_hash → tenant_name
+try:
+    raw = _json.loads(MCP_API_KEYS_JSON)
+    _api_key_hashes = {v: k for k, v in raw.items()}  # invert: hash → tenant
+except Exception:
+    logger.warning("Failed to parse MCP_API_KEYS — auth disabled")
+
+_rate_limiter = TokenBucketRateLimiter(rate=60, per_seconds=60)
+
+
+def _validate_key(key: str) -> tuple[bool, str | None]:
+    """Validate an API key against stored hashes."""
+    key_hash = hashlib.sha256(key.encode()).hexdigest()
+    tenant = _api_key_hashes.get(key_hash)
+    if tenant:
+        return True, tenant
+    return False, None
+
+
+_auth = APIKeyAuth(_validate_key)
 
 # ─── HTTP client (lazy import to avoid circular at module level) ───
 
@@ -623,6 +652,47 @@ async def health(request):
     })
 
 
+# ─── Auth Middleware for HTTP transport ───
+
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """API key auth for HTTP transport. Health endpoint is public."""
+
+    async def dispatch(self, request: Request, call_next):
+        # Health endpoint is always public
+        if request.url.path == "/health":
+            return await call_next(request)
+
+        # Skip auth if no keys configured (dev mode)
+        if not _api_key_hashes:
+            return await call_next(request)
+
+        # Check API key
+        headers = dict(request.headers)
+        result = _auth.authenticate(headers)
+        if not result.authenticated:
+            return JSONResponse(
+                status_code=401,
+                content=format_error("unauthorized", result.error or "Invalid API key"),
+            )
+
+        # Rate limit per tenant
+        rl = _rate_limiter.check(result.tenant)
+        if not rl.allowed:
+            return JSONResponse(
+                status_code=429,
+                content=format_error("rate_limited", "Too many requests", retryable=True),
+                headers={"Retry-After": str(int(rl.retry_after or 1))},
+            )
+
+        return await call_next(request)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(a):
     async with mcp.session_manager.run():
@@ -639,6 +709,7 @@ app = Starlette(
         Mount("/", _mcp_app),
     ],
     lifespan=lifespan,
+    middleware=[Middleware(AuthMiddleware)],
 )
 
 
