@@ -259,9 +259,14 @@ async def resolve_intent(
     results_raw = data.get("results", data.get("recommendations", []))
     products = []
     for i, p in enumerate(results_raw[:top_k]):
-        products.append({
-            "product_id": str(p.get("product_id", p.get("id", ""))),
-            "name": p.get("name", p.get("product_name", "")),
+        # product_id: handle is the primary key in Neo4j CatalogProduct nodes
+        pid = p.get("handle", p.get("product_id", p.get("id", "")))
+        if not pid:
+            pid = p.get("product_name", "").lower().replace(" ", "-")
+
+        product = {
+            "product_id": str(pid),
+            "name": p.get("product_name", p.get("name", "")),
             "brand": p.get("brand", p.get("brand_name", "")),
             "category": p.get("category", category if category != "auto" else ""),
             "price_usd": p.get("price_usd", p.get("price")),
@@ -269,8 +274,14 @@ async def resolve_intent(
             "image_url": p.get("image_url", p.get("image")),
             "confidence": p.get("confidence", p.get("match_score", p.get("score", 0))),
             "rank": i + 1,
-            "reasoning": _extract_reasoning(p) if include_reasoning else None,
-        })
+        }
+
+        if include_reasoning:
+            product["reasoning"] = _build_reasoning(p)
+        else:
+            product["reasoning"] = None
+
+        products.append(product)
 
     coverage = data.get("coverage_flag", data.get("resolution_metadata", {}).get("coverage_flag", "partial"))
 
@@ -302,14 +313,59 @@ async def resolve_intent(
     )
 
 
-def _extract_reasoning(product: dict) -> dict | None:
-    """Extract BIS reasoning fields from a product response."""
-    reason = product.get("reasoning") or product.get("match_reason")
-    if isinstance(reason, dict):
-        return reason
-    if isinstance(reason, str) and reason:
-        return {"differentiation_vector": reason}
-    return None
+def _build_reasoning(product: dict) -> dict | None:
+    """Build BIS reasoning from the resolution API's actual response fields.
+
+    The API returns: kernel_reasoning (list[str]), kernel_delta, kernel_score,
+    identity_signal_strength, provenance (sources, path_count, query_type,
+    discourse_boost).
+    """
+    # Check if there's any reasoning data at all
+    kernel_reasoning = product.get("kernel_reasoning", [])
+    provenance = product.get("provenance", {})
+    kernel_score = product.get("kernel_score")
+
+    if not kernel_reasoning and not provenance and kernel_score is None:
+        return None
+
+    # Map provenance sources to edge_types
+    sources = provenance.get("sources", [])
+    edge_types = [s.get("source", "") for s in sources if s.get("source")]
+
+    # Extract identity signals from kernel_reasoning strings
+    # Format: "identity[primary] +0.10: narrative_literary_intellectual ← ..."
+    occasion_fit = []
+    differentiation_parts = []
+    for kr in kernel_reasoning:
+        if "NOT_this" in kr:
+            continue  # Skip anti-intent audit lines
+        # Extract the signal name after the colon
+        if ": " in kr:
+            signal = kr.split(": ", 1)[1]
+            # Take the part before the arrow
+            if " \u2190 " in signal:
+                signal_name = signal.split(" \u2190 ")[0].strip()
+                occasion_fit.append(signal_name)
+                differentiation_parts.append(signal.split(" \u2190 ")[1].strip()[:100])
+
+    return {
+        "intent_match_score": product.get("kernel_score", product.get("score", 0)),
+        "occasion_fit": occasion_fit,
+        "differentiation_vector": "; ".join(differentiation_parts[:3]) if differentiation_parts else "",
+        "emotional_signature": {
+            "valence": product.get("identity_signal_strength", 0),
+            "arousal": product.get("kernel_delta", 0),
+        },
+        "exclusion_signals": [
+            kr.split(": ", 1)[1].split(" \u2190 ")[0].strip()
+            for kr in kernel_reasoning
+            if "NOT_this" in kr and ": " in kr
+        ],
+        "provenance": {
+            "edge_types": edge_types,
+            "source_discourse_count": int(provenance.get("discourse_boost", 0) > 0),
+        },
+    }
 
 
 # ─── Tool: list_categories (spec §4.1) ───
