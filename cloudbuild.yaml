@@ -1,0 +1,25 @@
+steps:
+  # Step 1: Generate pip credentials for Artifact Registry
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # Generate pip config with AR credentials
+        TOKEN=$(gcloud auth print-access-token)
+        echo "[global]" > /workspace/pip.conf
+        echo "extra-index-url = https://oauth2accesstoken:${TOKEN}@us-east1-python.pkg.dev/kernso-reddit-data-1/kernso-python/simple/" >> /workspace/pip.conf
+
+  # Step 2: Build Docker image with pip.conf
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-east1-docker.pkg.dev/$PROJECT_ID/kernso-repo/kernso-mcp:0.1.0'
+      - '-t'
+      - 'us-east1-docker.pkg.dev/$PROJECT_ID/kernso-repo/kernso-mcp:latest'
+      - '.'
+
+images:
+  - 'us-east1-docker.pkg.dev/$PROJECT_ID/kernso-repo/kernso-mcp:0.1.0'
+  - 'us-east1-docker.pkg.dev/$PROJECT_ID/kernso-repo/kernso-mcp:latest'
