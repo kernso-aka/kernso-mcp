@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  safety-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Safety lint (rules 2-5)
+        run: bash scripts/lint_safety.sh src/kernso_mcp
+
+  test:
+    runs-on: ubuntu-latest
+    needs: safety-lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-asyncio httpx respx
+          pip install -e .
+        env:
+          PIP_EXTRA_INDEX_URL: "https://oauth2accesstoken:${{ secrets.ARTIFACT_REGISTRY_TOKEN }}@us-east1-python.pkg.dev/kernso-reddit-data-1/kernso-python/simple/"
+      - name: Run tests
+        run: python -m pytest tests/ -v

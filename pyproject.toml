@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kernso-mcp"
+version = "0.1.0"
+description = "Kernso MCP Server — Intent resolution for shopping agents"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [{name = "Kernso Corporation", email = "eng@kernso.com"}]
+dependencies = [
+    "mcp[cli]>=1.20",
+    "httpx>=0.27",
+    "uvicorn>=0.29",
+    "starlette>=0.36",
+    "kernso-schemas>=0.1.0",
+    "kernso-client>=0.1.0",
+    "kernso-mcp-common>=0.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

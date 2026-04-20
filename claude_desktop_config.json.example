@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "kernso": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "KERNSO_API_URL=https://kernso-serve-422143170579.us-east1.run.app",
+        "kernso/mcp:0.1.0-dev",
+        "python", "-m", "kernso_mcp.server", "--stdio"
+      ]
+    }
+  }
+}
