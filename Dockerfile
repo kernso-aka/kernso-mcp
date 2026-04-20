@@ -21,6 +21,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application
 COPY src/ src/
 
+ENV PYTHONPATH=/app/src
+
 # Switch to non-root
 USER kernso
 
