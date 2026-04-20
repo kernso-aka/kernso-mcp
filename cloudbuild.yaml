@@ -5,10 +5,12 @@ steps:
     args:
       - '-c'
       - |
-        # Generate pip config with AR credentials
-        TOKEN=$(gcloud auth print-access-token)
+        gcloud auth print-access-token > /workspace/.ar_token
         echo "[global]" > /workspace/pip.conf
-        echo "extra-index-url = https://oauth2accesstoken:${TOKEN}@us-east1-python.pkg.dev/kernso-reddit-data-1/kernso-python/simple/" >> /workspace/pip.conf
+        printf "extra-index-url = https://oauth2accesstoken:" >> /workspace/pip.conf
+        cat /workspace/.ar_token | tr -d '\n' >> /workspace/pip.conf
+        echo "@us-east1-python.pkg.dev/kernso-reddit-data-1/kernso-python/simple/" >> /workspace/pip.conf
+        rm /workspace/.ar_token
 
   # Step 2: Build Docker image with pip.conf
   - name: 'gcr.io/cloud-builders/docker'
