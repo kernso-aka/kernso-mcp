@@ -11,8 +11,11 @@ steps:
         cat /workspace/.ar_token | tr -d '\n' >> /workspace/pip.conf
         echo "@us-east1-python.pkg.dev/kernso-reddit-data-1/kernso-python/simple/" >> /workspace/pip.conf
         rm /workspace/.ar_token
+        echo "=== Build context check ==="
+        ls -la /workspace/src/kernso_mcp/ || echo "WARNING: src/kernso_mcp/ not found!"
+        cat /workspace/src/kernso_mcp/__init__.py || echo "WARNING: __init__.py not found!"
 
-  # Step 2: Build Docker image with pip.conf
+  # Step 2: Build Docker image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
